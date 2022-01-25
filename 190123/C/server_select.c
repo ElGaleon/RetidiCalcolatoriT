@@ -1,8 +1,8 @@
 /**
   * server_select.c
   *  Il server discrimina due servizi con la select:
-  *    + elimina le occorrenze di una parola in un file (UDP)
-  *    + restituisce i nomi dei file in un direttorio di secondo livello
+  *    + aggiornamento patente (UDP)
+  *    + download immagini (TCP)
   **/
 
 #include <dirent.h>
@@ -26,7 +26,7 @@
 #define DIMTARGA 7
 #define DIMPATENTE 5
 #define N 50
-#define max(a, b) ((a) > (b) ? (a) : (b))
+#define max(a, b)  ((a > b) ? a : b)
 
 
 /********************************************************/
@@ -117,9 +117,11 @@ int main(int argc, char** argv) {
     fd_set rset;
     FILE *fileToSend;
     ReqUDP req;
+    int dim, fts;
+    char path[256], filePath[256];
     int fd_sorg_udp, fd_temp_udp, count_letters;
     char read_char, err[128], word_buffer[WORD_LENGTH], targa[DIMTARGA+1];
-    char charBuff[2], newDir[LINE_LENGTH], fileNameTemp[LINE_LENGTH], fileName[LINE_LENGTH], dir[LINE_LENGTH];
+    char charBuff[256], newDir[LINE_LENGTH], fileNameTemp[LINE_LENGTH], fileName[LINE_LENGTH], dir[LINE_LENGTH];
     DIR *dir1, *dir2, *dir3;
     struct dirent *dd1, *dd2;
 
@@ -259,6 +261,11 @@ int main(int argc, char** argv) {
         }
         /* GESTIONE RICHIESTE TCP  ----------------------------- */
         if(FD_ISSET(listen_sd, &rset)) {
+            if (getcwd(path, sizeof(path)) == NULL) {
+                perror("Errore path");
+                exit(1);
+            }
+            printf("Path corrente: %s\n", path);
             printf("Ricevuta richiesta TCP: download immagini\n");
             len = sizeof(cliaddr);
             if((conn_sd = accept(listen_sd, (struct sockaddr*)&cliaddr, &len)) < 0) {
@@ -277,7 +284,8 @@ int main(int argc, char** argv) {
                     exit(6);
                 } else
                     printf("Server (figlio): host client e' %s \n", hostTcp->h_name);
-
+               
+                
                 // Leggo la richiesta del client
                 while((nread = read(conn_sd, targa, sizeof(targa))) > 0) {
                     printf("Server (figlio):letti %d char \n", nread);
@@ -287,78 +295,51 @@ int main(int argc, char** argv) {
                     {
                         /* code */
                         if (strcmp(targa, tab[i].targa) == 0) {
-                            dir1 = opendir(tab[i].folder);
+                            dir1 = opendir(tab[i].folder);  
+                             
                             while ((de = readdir(dir1)) != NULL) {
                                 if (strstr(de->d_name, ".jpg") != NULL || strstr(de->d_name, ".png") != NULL ||
-                                    strstr(de->d_name, ".jpeg") != NULL)
+                                    strstr(de->d_name, ".jpeg") != NULL) {
                                 printf("Immagine: %s\n", de->d_name);
-                                send(conn_sd, de->d_name, strlen(de->d_name), 0);
-                                // Trasferimento foto
+                                sprintf(filePath, "%s/%s/%s", path, tab[i].folder, de->d_name);
+                                printf("%s\n", filePath);
+                                // Trasferimento nome immagine
+                                write(conn_sd, strcpy(charBuff, de->d_name), sizeof(de->d_name));
 
+                                // Trasferimento immagine                                 
+                                fileToSend = fopen(filePath, "rb"); 
+                                if (fileToSend == NULL) {
+                                    printf("Errore apertura immagine\n");
+                                    exit(1);
+                                }
+                                
+                                fseek(fileToSend, 0, 2);
+                                long size = ftell(fileToSend);
+                                printf("Invio dimensione immagine: %d bytes\n", size);
+                                fseek(fileToSend, 0, SEEK_SET);
+                                //Send Picture Size
+                                write(conn_sd, &size, sizeof(size));   
+                                char ch;
+                                
+                                printf("Dimensione inviata! Ora procedo ad inviare l'immagine\n");
+                                while(fread(charBuff, sizeof(char), sizeof(charBuff), fileToSend) > 0) {
+                                    write(conn_sd, charBuff, sizeof(charBuff));
+                                }
+                                printf("Immagine inviata!\n");
+                                    fclose(fileToSend);
+                                }
                             }
-  
-                        closedir(dir1); 
                         }
+                        closedir(dir1); 
                     }
-                    
-
-                    /*
-                    char risp;
-                    if((dir1 = opendir(dir)) != NULL) {  // direttorio presente
-                        risp = 'S';
-                        printf("Invio risposta affermativa al client\n");
-                        write(conn_sd, &risp, sizeof(char));
-                        while((dd1 = readdir(dir1)) != NULL) {
-                            if(strcmp(dd1->d_name, ".") != 0 && strcmp(dd1->d_name, "..") != 0) {
-                                //build new path
-                                newDir[0] = '\0';
-                                strcat(newDir, dir);
-                                strcat(newDir, "/");
-                                strcat(newDir, dd1->d_name);
-                                //printf("Test apertura dir su %s\n", newDir);
-                                if((dir2 = opendir(newDir)) != NULL) {  //dir sec lvl
-                                    //printf("Ciclo dir sec lvl %s\n", newDir);
-                                    while((dd2 = readdir(dir2)) != NULL) {
-                                        if(strcmp(dd2->d_name, ".") != 0 && strcmp(dd2->d_name, "..") != 0) {
-                                            //build new path
-                                            strcat(newDir, "/");
-                                            strcat(newDir, dd2->d_name);
-                                            printf("Test apertura dir su %s\n", newDir);
-                                            if((dir3 = opendir(newDir)) == NULL) {  // file of sec lvlv
-                                                printf("%s è un file di sec lvl \n", dd2->d_name);
-                                                strcpy(fileName, dd2->d_name);
-                                                strcat(fileName, "\0");
-                                                printf("Invio nome fileName: %s\n", fileName);
-                                                // Il nome del file viene inviato subito, appena scoperto. Sarebbe un errore
-                                                // creare una grande stringa con tutti i nomi e inviarla solo alla fine!
-                                                if(write(conn_sd, fileName, (strlen(fileName) + 1)) < 0) {
-                                                    perror("Errore nell'invio del nome file\n");
-                                                    continue;
-                                                }
-                                            }  //if file 2 lvl
-                                        }      //if not . and .. 2 lvl
-                                    }          //while in 2 lvl
-                                    printf("Fine invio\n");
-                                    risp = '#';
-                                    write(conn_sd, &risp, sizeof(char));
-                                }  //if dir 2 lvl
-                            }      //if not . and .. 1 lvl
-                        }          //while frst lvl
-                    }              //if open dir 1 lvl
-                    else {         //err apertura dir
-                        risp = 'N';
-                        printf("Invio risposta negativa al client per dir %s \n", dir);
-                        write(conn_sd, &risp, sizeof(char));
-                    }
-                    */
                 }  //while read req
+                
 
                 // Libero risorse
                 printf("Figlio TCP terminato, libero risorse e chiudo. \n");
+            }
                 close(conn_sd);
-                exit(0);
-            }                //if fork
-            close(conn_sd);  //padre
-        }                    //if TCP
-    }                        //for
-}  //main
+        }
+
+        }
+}

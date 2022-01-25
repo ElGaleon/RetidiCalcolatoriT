@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <fcntl.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -17,9 +18,12 @@
 
 int main(int argc, char* argv[]) {
     int port, nread, sd, nwrite;
-    char targa[DIMTARGA+1], buffChar;
+    char targa[DIMTARGA+1];
+    char fileName[LINE_LENGTH], buff[LINE_LENGTH];
+    FILE *newFile;
     struct hostent* host;
     struct sockaddr_in servaddr;
+    long size;
 
     /* CONTROLLO ARGOMENTI ---------------------------------- */
     if(argc != 3) {
@@ -77,27 +81,37 @@ int main(int argc, char* argv[]) {
         nwrite = write(sd, targa, strlen(targa));
 
         // Lettura risposta dal server
-        while( read(sd, &buffChar, sizeof(buffChar)) >0 ) {
-            printf("Immagine da scaricare: %s\n", buffChar);
-        }
-        /*
-        read(sd, &buffChar, sizeof(char));
-        if(buffChar == 'S') {
-            printf("Ricevo e stampo i file nel direttorio remoto:\n");
-            while((nread = read(sd, &buffChar, sizeof(char))) > 0) {
-                if(buffChar == '#') {
-                    break;
-                } else if(buffChar == '\0') {
-                    write(1, &buffChar, sizeof(char));
-                    printf("\n");
-                } else {
-                    write(1, &buffChar, sizeof(char));
+        while( read(sd, fileName, sizeof(fileName)) >0 ) {
+            printf("Immagine da scaricare: %s\n", fileName);
+                newFile = fopen(fileName, "wb");
+                if (newFile < 0) {
+                    perror("Errore creazione nuovo file");
+                }
+            if (read(sd, &size, sizeof(size)) > 0) {
+                printf("Dimensione immagine: %d bytes\n", size);
+            } else {
+                perror("Errore lettua dimensione file\n");
+            }
+
+            
+            long countDim = 0;
+            char ch;
+            printf("Download dell'immagine...\n");
+            
+            // Ciclo che legge il contenuto del file
+            while (read(sd, buff, sizeof(buff) > 0 )) {
+                if (fwrite(buff, sizeof(char), sizeof(buff), newFile) < 0) {
+                    perror("Errore nella write");
+                    printf("Inserire un direttorio corretto:\n");
+                    continue;
                 }
             }
-        } else {
-            printf("directory non presente sul server\n");
+
+            printf("Immagine scaricata!\n");
+            fileName[0] = '\0';
+            
+           printf("Inserire numero di targa secondo questo formato [AA123BB], EOF per terminare: ");
         }
-        */
         printf("Inserire numero di targa secondo questo formato [AA123BB], EOF per terminare: ");
     }
     /* Chiusura socket in ricezione */
